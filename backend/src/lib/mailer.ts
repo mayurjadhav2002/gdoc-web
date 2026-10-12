@@ -1,12 +1,36 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { Resend } from "resend";
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 let transporter: Transporter | null = null;
+
+function getResendClient(): Resend | null {
+  if (process.env.RESEND_API_KEY && !process.env.GMAIL_USER && !process.env.SMTP_USER) {
+    return new Resend(process.env.RESEND_API_KEY);
+  }
+  return null;
+}
 
 async function getTransporter(): Promise<Transporter> {
   if (transporter) return transporter;
 
+  const gmailUser = process.env.GMAIL_USER || (process.env.SMTP_HOST === "smtp.gmail.com" ? process.env.SMTP_USER : undefined);
+  const gmailPass = process.env.GMAIL_APP_PASSWORD || (process.env.SMTP_HOST === "smtp.gmail.com" ? process.env.SMTP_PASS : undefined);
+
+  // 1. Prioritize Gmail App Password via Nodemailer
+  if (gmailUser && gmailPass) {
+    const cleanPassword = gmailPass.replace(/\s+/g, "");
+    transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: gmailUser,
+        pass: cleanPassword,
+      },
+    });
+    console.log(`[Mailer] Configured Gmail SMTP service for ${gmailUser}`);
+    return transporter;
+  }
+
+  // 2. Custom SMTP host & port
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -17,20 +41,22 @@ async function getTransporter(): Promise<Transporter> {
         pass: process.env.SMTP_PASS,
       },
     });
-  } else {
-    // Development fallback: ethereal test account for real preview URLs in dev
-    const testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    });
-    console.log("[Mailer] Ethereal dev test account created:", testAccount.user);
+    console.log(`[Mailer] Configured custom SMTP transport via ${process.env.SMTP_HOST}`);
+    return transporter;
   }
+
+  // 3. Development fallback: ethereal test account
+  const testAccount = await nodemailer.createTestAccount();
+  transporter = nodemailer.createTransport({
+    host: "smtp.ethereal.email",
+    port: 587,
+    secure: false,
+    auth: {
+      user: testAccount.user,
+      pass: testAccount.pass,
+    },
+  });
+  console.log("[Mailer] Ethereal dev test account created:", testAccount.user);
 
   return transporter;
 }
@@ -53,7 +79,6 @@ export async function sendCollaborationInviteEmail({
   isRegisteredUser,
 }: SendInviteParams) {
   try {
-    const client = await getTransporter();
     const frontendUrl =
       process.env.FRONTEND_URL || `http://localhost:${process.env.FRONEND_PORT || 3000}`;
 
@@ -90,6 +115,7 @@ export async function sendCollaborationInviteEmail({
       </div>
     `;
 
+    const resend = getResendClient();
     if (resend) {
       const response = await resend.emails.send({
         from: process.env.RESEND_FROM_EMAIL || "GDocs <onboarding@resend.dev>",
@@ -104,11 +130,14 @@ export async function sendCollaborationInviteEmail({
       }
 
       console.warn(`[Resend Mailer Sandbox Restriction] Resend could not deliver to ${to}:`, response.error.message);
-      // Fallback to Nodemailer/Ethereal for local development / testing
     }
 
+    const client = await getTransporter();
+    const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+    const fromAddress = process.env.SMTP_FROM || (gmailUser ? `GDocs <${gmailUser}>` : `"GDocs" <no-reply@gdocs.app>`);
+
     const info = await client.sendMail({
-      from: `"GDocs" <${process.env.SMTP_FROM || "no-reply@gdocs.app"}>`,
+      from: fromAddress,
       to,
       subject: `${inviterName} invited you to collaborate on "${documentTitle}"`,
       html,
@@ -117,14 +146,15 @@ export async function sendCollaborationInviteEmail({
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
       console.log(`[Mailer] Preview invite email for ${to}:`, previewUrl);
+    } else {
+      console.log(`[Mailer] Successfully sent invite email to ${to} via Nodemailer (MessageId: ${info.messageId})`);
     }
 
     return {
       success: true,
-      provider: "nodemailer",
+      provider: gmailUser ? "nodemailer-gmail" : "nodemailer",
       messageId: info.messageId,
       previewUrl: previewUrl || undefined,
-      note: resend ? "Resend sandbox only permits sending to your registered account email. Fallback preview email generated." : undefined,
     };
   } catch (error) {
     console.error("[Mailer] Failed to send email:", error);
@@ -149,7 +179,6 @@ export async function sendPendingDocumentsSummaryEmail({
   pendingDocuments,
 }: SendPendingDocsSummaryParams) {
   try {
-    const client = await getTransporter();
     const frontendUrl =
       process.env.FRONTEND_URL || `http://localhost:${process.env.FRONEND_PORT || 3000}`;
 
@@ -182,6 +211,7 @@ export async function sendPendingDocumentsSummaryEmail({
       </div>
     `;
 
+    const resend = getResendClient();
     if (resend) {
       const data = await resend.emails.send({
         from: process.env.RESEND_FROM_EMAIL || "GDocs <onboarding@resend.dev>",
@@ -192,18 +222,18 @@ export async function sendPendingDocumentsSummaryEmail({
       return { success: true, messageId: data.data?.id };
     }
 
+    const client = await getTransporter();
+    const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+    const fromAddress = process.env.SMTP_FROM || (gmailUser ? `GDocs <${gmailUser}>` : `"GDocs" <no-reply@gdocs.app>`);
+
     const info = await client.sendMail({
-      from: `"GDocs" <${process.env.SMTP_FROM || "no-reply@gdocs.app"}>`,
+      from: fromAddress,
       to,
       subject: `Welcome to GDocs! You have ${pendingDocuments.length} pending document invitation(s)`,
       html,
     });
 
     const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      console.log(`[Mailer] Preview summary email for ${to}:`, previewUrl);
-    }
-
     return { success: true, messageId: info.messageId, previewUrl };
   } catch (error) {
     console.error("[Mailer] Failed to send summary email:", error);

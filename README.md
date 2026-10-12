@@ -78,6 +78,13 @@ LIVEBLOCKS_SECRET_KEY=your_liveblocks_secret_key
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 SUPABASE_BUCKET=attachments
+
+# Email Delivery via Gmail App Password (Nodemailer - delivers to any recipient)
+GMAIL_USER=your_email@gmail.com
+GMAIL_APP_PASSWORD=your_16_char_google_app_password
+SMTP_FROM="GDocs <your_email@gmail.com>"
+
+# Alternative: Resend API (Sandbox only sends to account owner unless custom domain is verified)
 RESEND_API_KEY=your_resend_api_key
 RESEND_FROM_EMAIL=onboarding@resend.dev
 ```
