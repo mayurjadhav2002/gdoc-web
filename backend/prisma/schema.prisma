@@ -1,0 +1,102 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                  String         @id
+  email               String         @unique
+  name                String?
+  avatarUrl           String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  documents           Document[]     @relation("OwnerDocuments")
+  collaborations      Collaborator[]
+  folders             Folder[]
+  invitationsReceived Invitation[]   @relation("InviteeInvitations")
+  invitationsSent     Invitation[]   @relation("InviterInvitations")
+}
+
+model Folder {
+  id        String     @id @default(uuid())
+  name      String
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents Document[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Document {
+  id            String         @id @default(uuid())
+  title         String         @default("Untitled Document")
+  content       Json?
+  plainText     String?
+  ownerId       String
+  owner         User           @relation("OwnerDocuments", fields: [ownerId], references: [id], onDelete: Cascade)
+  folderId      String?
+  folder        Folder?        @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  isArchived    Boolean        @default(false)
+  collaborators Collaborator[]
+  invitations   Invitation[]
+  attachments   Attachment[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+enum Role {
+  VIEWER
+  COMMENTER
+  EDITOR
+  OWNER
+}
+
+model Collaborator {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @default(VIEWER)
+  createdAt  DateTime @default(now())
+
+  @@unique([documentId, userId])
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+model Invitation {
+  id         String           @id @default(uuid())
+  documentId String
+  document   Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  inviterId  String
+  inviter    User             @relation("InviterInvitations", fields: [inviterId], references: [id], onDelete: Cascade)
+  email      String
+  inviteeId  String?
+  invitee    User?            @relation("InviteeInvitations", fields: [inviteeId], references: [id], onDelete: SetNull)
+  role       Role             @default(VIEWER)
+  status     InvitationStatus @default(PENDING)
+  token      String           @unique @default(uuid())
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+}
+
+model Attachment {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  fileName   String
+  fileSize   Int
+  mimeType   String
+  fileUrl    String
+  createdAt  DateTime @default(now())
+}
